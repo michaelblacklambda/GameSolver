@@ -7,5 +7,5 @@ pub trait GameRules {
 
     fn is_winning_state(&self) -> bool;
 
-    fn reward_value(&self) -> u64;
+    fn reward_value(&self, player: super::game::GamePlayer) -> i64;
 }

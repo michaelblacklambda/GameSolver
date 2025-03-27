@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
-use itertools::{multizip, Itertools};
+use itertools::Itertools;
 
+use crate::game::game::GamePlayer;
 use crate::game::rules::GameRules;
 use crate::game::state::GameState;
 
@@ -13,22 +14,41 @@ pub struct ConnectFour {
 }
 
 impl ConnectFour {
+    fn set_position(&self, row: usize, column: usize) -> Self {
+        let piece = if self.red_turn {
+            Piece::Red
+        } else {
+            Piece::Black
+        };
+
+        let mut new_board = self.board.clone();
+        new_board[row][column] = piece;
+        ConnectFour {
+            board: new_board,
+            red_turn: !self.red_turn,
+            last_move: Some((row, column)),
+        }
+    }
+
     fn get_open_row<'a>(board: &Vec<Vec<Piece>>, column: usize) -> Option<usize> {
-        let open_row = (0..7)
-            .map(|indice| (indice, board[indice][column]))
-            .filter(|(_indice, piece)| *piece == Piece::Empty)
-            .map(|(indice, _)| indice)
-            .min();
+        let row_len = board.len();
+
+        let open_row = (0..row_len)
+            .map(|row| (row, board[row][column]))
+            .filter(|(_row, piece)| *piece == Piece::Empty)
+            .map(|(row, _)| row)
+            .max();
+
         open_row
     }
 
-    fn get_all_open_rows<'a>(
-        board: &'a Vec<Vec<Piece>>,
-    ) -> impl Iterator<Item = (usize, usize)> + 'a {
-        (0..7)
-            .map(move |column| (column, ConnectFour::get_open_row(&board, column)))
-            .filter(|(_column, row)| row.is_some())
-            .map(|(column, row)| (column, row.unwrap()))
+    fn get_all_open_rows(board: &Vec<Vec<Piece>>) -> Vec<(usize, usize)> {
+        let num_cols = board.first().unwrap().len();
+        (0..num_cols)
+            .map(|column| (ConnectFour::get_open_row(&board, column), column))
+            .filter(|(row, _column)| row.is_some())
+            .map(|(row, column)| (row.unwrap(), column))
+            .collect_vec()
     }
 
     fn horizontal_win(board: &Vec<Vec<Piece>>, player: Piece) -> bool {
@@ -85,6 +105,18 @@ impl ConnectFour {
 
         ConnectFour::horizontal_win(&new_board, player)
     }
+
+    pub fn make_user_move(&self, col: usize) -> Self {
+        let valid_moves = ConnectFour::get_all_open_rows(&self.board);
+        let player_move = valid_moves
+            .into_iter()
+            .filter(|(_r, c)| c == &col)
+            .collect_vec()
+            .first()
+            .unwrap()
+            .clone();
+        self.set_position(player_move.0, player_move.1)
+    }
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -99,6 +131,10 @@ impl GameRules for ConnectFour {
     where
         Self: Sized,
     {
+        if (self.is_game_over()) {
+            return Vec::new();
+        }
+
         let board = &self.board;
         let piece = if self.red_turn {
             Piece::Red
@@ -107,23 +143,15 @@ impl GameRules for ConnectFour {
         };
 
         let new_states = ConnectFour::get_all_open_rows(&board)
-            .map(|(column, row)| {
-                let mut new_board = board.clone();
-                new_board[row][column] = piece;
-                (new_board, (row, column))
-            })
-            .map(|(new_board, (row, column))| ConnectFour {
-                board: new_board,
-                red_turn: !self.red_turn,
-                last_move: Some((row, column)),
-            })
+            .into_iter()
+            .map(|(row, column)| self.set_position(row, column))
             .collect();
 
         return new_states;
     }
 
     fn is_game_over(&self) -> bool {
-        ConnectFour::get_all_open_rows(&self.board).next().is_none() || self.is_winning_state()
+        ConnectFour::get_all_open_rows(&self.board).is_empty() || self.is_winning_state()
     }
 
     fn is_winning_state(&self) -> bool {
@@ -161,15 +189,30 @@ impl GameRules for ConnectFour {
         return false;
     }
 
-    fn reward_value(&self) -> u64 {
-        todo!()
+    fn reward_value(&self, player: GamePlayer) -> i64 {
+        let last_player = if self.red_turn {
+            GamePlayer::Player1
+        } else {
+            GamePlayer::Player2
+        };
+
+        let winner = self.is_winning_state();
+        let score = if winner && last_player == player {
+            1
+        } else if winner && last_player != player {
+            -1
+        } else {
+            0
+        };
+
+        score
     }
 }
 
 impl GameState for ConnectFour {
     fn initial_state() -> Self {
         ConnectFour {
-            board: vec![vec![Piece::Empty; 7]; 7],
+            board: vec![vec![Piece::Empty; 7]; 6],
             red_turn: true,
             last_move: Option::None,
         }
@@ -188,5 +231,61 @@ impl GameState for ConnectFour {
                     .fold(String::new(), |acc, piece| acc + &piece.to_string())
             })
             .fold(String::new(), |acc, row| acc + "\n" + &row)
+    }
+
+    fn player_turn(&self) -> GamePlayer {
+        if self.red_turn {
+            GamePlayer::Player1
+        } else {
+            GamePlayer::Player2
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::game_implementations::connect_four;
+
+    use super::*;
+
+    #[test]
+    fn test_open_row() {
+        let connect_four = ConnectFour::initial_state();
+
+        let open_row = ConnectFour::get_open_row(&connect_four.board, 0).unwrap();
+        let col_count = connect_four.board.first().unwrap().len();
+
+        assert_eq!(open_row, col_count - 1);
+
+        for col in 0..col_count {
+            let open_row = ConnectFour::get_open_row(&connect_four.board, col).unwrap();
+            assert_eq!(open_row, connect_four.board.len() - 1);
+        }
+    }
+
+    #[test]
+    fn test_all_open_rows() {
+        let connect_four = ConnectFour::initial_state();
+
+        let open_rows = ConnectFour::get_all_open_rows(&connect_four.board);
+        let num_rows = connect_four.board.len();
+        let num_cols = connect_four.board.first().unwrap().len();
+
+        for (row, column) in open_rows {
+            assert_eq!(row, num_rows - 1);
+        }
+
+        let connect_four = connect_four.make_user_move(0);
+        let open_rows = ConnectFour::get_all_open_rows(&connect_four.board);
+        let num_rows = connect_four.board.len();
+        let num_cols = connect_four.board.first().unwrap().len();
+
+        for (row, column) in open_rows {
+            if column == 0 {
+                assert_eq!(row, num_rows - 2);
+            } else {
+                assert_eq!(row, num_rows - 1);
+            }
+        }
     }
 }
