@@ -1,0 +1,4 @@
+Combinatorial Game solver that implements brute force and mcts strategies.
+
+Games currently supported:
+    - Connect Four
