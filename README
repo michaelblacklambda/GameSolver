@@ -1,4 +1,6 @@
 Combinatorial Game solver that implements brute force and mcts strategies.
 
+This project doesn't use "indices" in order to make the project more challenging.
+
 Games currently supported:
     - Connect Four
